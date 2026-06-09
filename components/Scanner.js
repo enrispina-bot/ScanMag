@@ -3,84 +3,58 @@ import { db } from "../lib/firebase"
 import { collection, addDoc, serverTimestamp } from "firebase/firestore"
 
 export default function Scanner() {
-  const videoRef = useRef(null)
+  const containerRef = useRef(null)
 
   useEffect(() => {
-    let stream
+    let scanner = null
 
-    const startCamera = async () => {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" }
-        })
+    const loadScanner = async () => {
+      // ✅ carica libreria da internet
+      const script = document.createElement("script")
+      script.src = "https://unpkg.com/html5-qrcode"
+      script.async = true
 
-        videoRef.current.srcObject = stream
-        await videoRef.current.play()
+      script.onload = () => {
+        scanner = new window.Html5Qrcode("reader")
 
-        // ✅ Verifica supporto BarcodeDetector
-        if (!("BarcodeDetector" in window)) {
-          alert("BarcodeDetector NON supportato su questo dispositivo")
-          return
-        }
+        scanner.start(
+          { facingMode: "environment" },
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 }
+          },
+          async (decodedText) => {
 
-        const detector = new window.BarcodeDetector({
-          formats: ["qr_code", "code_128", "ean_13"]
-        })
+            console.log("SCANNED:", decodedText)
 
-        const scan = async () => {
-          try {
-            const barcodes = await detector.detect(videoRef.current)
+            await addDoc(collection(db, "assets"), {
+              id: decodedText,
+              timestamp: serverTimestamp()
+            })
 
-            if (barcodes.length > 0) {
-              const code = barcodes[0].rawValue
+            // ✅ beep
+            new Audio("/beep.mp3").play()
 
-              console.log("SCANSIONE:", code)
-
-              // ✅ salva su firebase
-              await addDoc(collection(db, "assets"), {
-                id: code,
-                timestamp: serverTimestamp()
-              })
-
-              // ✅ beep
-              const audio = new Audio("/beep.mp3")
-              audio.play()
-
-              // ✅ aspetta un attimo per evitare doppioni
-              await new Promise(r => setTimeout(r, 1500))
-            }
-          } catch (err) {
-            console.log("Errore scan:", err)
-          }
-
-          requestAnimationFrame(scan)
-        }
-
-        scan()
-
-      } catch (err) {
-        console.error("Errore camera:", err)
-        alert("Errore accesso camera")
+          },
+          () => {}
+        )
       }
+
+      document.body.appendChild(script)
     }
 
-    startCamera()
+    loadScanner()
 
     return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop())
+      if (scanner) {
+        scanner.stop().catch(() => {})
       }
     }
   }, [])
 
   return (
     <div>
-      <video
-        ref={videoRef}
-        style={{ width: "100%", maxWidth: "400px" }}
-        muted
-        playsInline
-      />
+      <div id="reader" style={{ width: "100%" }}></div>
     </div>
   )
 }
